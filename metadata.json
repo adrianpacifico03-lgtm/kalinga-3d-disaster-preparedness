@@ -1,0 +1,6 @@
+{
+  "name": "KALINGA",
+  "description": "Prepared Together. Safer Together. Community emergency preparedness and disaster safety companion.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
