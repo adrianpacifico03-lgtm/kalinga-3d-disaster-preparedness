@@ -1,0 +1,95 @@
+name: Build KALINGA Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Dependencies & Build Web App
+        env:
+          npm_config_legacy_peer_deps: "true"
+        run: |
+          PKG_FILE=$(find . -maxdepth 3 -name "package.json" -not -path "*/node_modules/*" | head -n 1)
+          if [ -z "$PKG_FILE" ]; then
+            echo "ERROR: No package.json found in repository!"
+            exit 1
+          fi
+          APP_DIR=$(dirname "$PKG_FILE")
+          echo "Found project in: $APP_DIR"
+          cd "$APP_DIR"
+
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            if (pkg.dependencies && pkg.dependencies.esbuild) pkg.dependencies.esbuild = "^0.28.2";
+            if (pkg.devDependencies && pkg.devDependencies.esbuild) pkg.devDependencies.esbuild = "^0.28.2";
+            pkg.overrides = { ...(pkg.overrides || {}), "esbuild": "^0.28.2" };
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
+          '
+
+          npm install --legacy-peer-deps
+          npm run build || npx vite build
+
+          if [ -d "dist" ]; then
+            WEB_DIR="dist"
+          elif [ -d "build" ]; then
+            WEB_DIR="build"
+          else
+            echo "ERROR: Build folder (dist/build) not found!"
+            exit 1
+          fi
+
+          npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps
+
+          cat << EOF > capacitor.config.ts
+          import type { CapacitorConfig } from '@capacitor/cli';
+
+          const config: CapacitorConfig = {
+            appId: 'ph.kalinga.app',
+            appName: 'KALINGA',
+            webDir: '$WEB_DIR',
+            server: {
+              androidScheme: 'https',
+              cleartext: true
+            },
+            android: {
+              allowMixedContent: true
+            }
+          };
+
+          export default config;
+          EOF
+
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload KALINGA APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kalinga-app-debug
+          path: "**/android/app/build/outputs/apk/debug/app-debug.apk"
